@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>SING WUAZE</title>
+    <link rel="icon" type="image/png" href="assets/ic.png">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+
+    <style>
+        @font-face { font-family: 'WZ'; src: url('assets/wz.ttf'); }
+        html, body { margin: 0; padding: 0; background: black; overflow: hidden; font-family: 'WZ'; }
+        #loadingScreen { position: fixed; inset: 0; background: url('assets/loading.jpg') no-repeat center center; background-size: cover; z-index: 99999; }
+        #mainContent { display: none; }
+        #bgVideo { position: fixed; inset: 0; width: 100vw; height: 100vh; object-fit: cover; z-index: -3; }
+        #overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.45); z-index: -2; }
+
+        #titleWrapper {
+            position: absolute; width: 100%; text-align: center; z-index: 5;
+            top: 40px; left: 0; display: flex; flex-direction: column; align-items: center; white-space: nowrap;
+        }
+        #titleWrapper.centerStage { top: 50%; transform: translateY(-50%) scale(1.1); transition: all 0.8s cubic-bezier(0.4, 0, 0.2, 1); }
+        #titleWrapper.cornerStage { top: auto; bottom: 0; left: 0; width: auto; flex-direction: row; align-items: baseline; transform: scale(0.2); transform-origin: left bottom; transition: none !important; }
+
+        /* LYRICS BOX */
+        #lyricsContainer {
+            position: absolute;
+            bottom: 10%; width: 100%;
+            text-align: center;
+            z-index: 10;
+            pointer-events: none;
+        }
+        #lyricsText {
+            font-size: 50px;
+            color: #FFD700; /* Gold/Yellow for lyrics */
+            -webkit-text-stroke: 2px black;
+            text-shadow: 3px 3px 5px rgba(0,0,0,0.8);
+            transition: all 0.3s ease;
+        }
+
+        .blink { animation: blinkAnim 1s infinite; }
+        .pausedBlink { animation: blinkAnim 1.5s infinite; opacity: 0.7; }
+
+        #songTitle { font-size: 80px; color: white; -webkit-text-stroke: 3px black; }
+        #artistName { font-size: 45px; color: white; -webkit-text-stroke: 2.5px black; }
+        .dash { display: none; font-size: 80px; color: white; -webkit-text-stroke: 3px black; margin: 0 5px; }
+        #songCodeDisplay { display: none; font-size: 80px; color: white; -webkit-text-stroke: 3px black; }
+
+        #titleWrapper.cornerStage .dash, #titleWrapper.cornerStage #songCodeDisplay { display: inline; }
+        #titleWrapper.cornerStage #songTitle, #titleWrapper.cornerStage #artistName { font-size: 60px; margin: 0; padding: 0; }
+
+        @keyframes blinkAnim { 0%, 49% { visibility: visible; } 50%, 100% { visibility: hidden; } }
+        #numberDisplay { position: absolute; bottom: 120px; width: 100%; text-align: center; font-size: 80px; color: white; -webkit-text-stroke: 3px black; letter-spacing: 10px; z-index: 5; }
+        #logo { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 190px; z-index: 5; transition: opacity 0.5s; }
+    </style>
+</head>
+
+<body>
+<div id="loadingScreen"></div>
+<div id="mainContent">
+    <video id="bgVideo" autoplay muted loop playsinline><source src="assets/bg_v.mp4" type="video/mp4"></video>
+    <div id="overlay"></div>
+    <img src="assets/ic_title.png" style="position:absolute; top:15px; right:20px; width:120px; z-index:5;">
+    <img src="assets/ic.png" id="logo">
+    
+    <div id="titleWrapper" class="blink">
+        <div id="songTitle">SELECT SONG</div>
+        <span class="dash">-</span>
+        <div id="artistName"></div>
+        <span class="dash">-</span>
+        <div id="songCodeDisplay"></div>
+    </div>
+
+    <div id="lyricsContainer">
+        <div id="lyricsText"></div>
+    </div>
+
+    <div id="numberDisplay"></div>
+</div>
+<audio id="bootSound" src="assets/sfx_boot.mp3"></audio>
+
+<script>
+let songData = {};
+let currentNumbers = "";
+let lyricsArray = [];
+const limit = 5;
+let loadingFinished = false;
+let isPlaying = false;
+
+// Audio
+let audioCtx, instSource, vocalSource, delayNode, feedbackNode, dryGain, echoOutGain;
+const instTrack = new Audio();
+const vocalTrack = new Audio();
+instTrack.crossOrigin = "anonymous";
+vocalTrack.crossOrigin = "anonymous";
+
+const display = document.getElementById("numberDisplay");
+const title = document.getElementById("songTitle");
+const artist = document.getElementById("artistName");
+const codeDisplay = document.getElementById("songCodeDisplay");
+const titleWrapper = document.getElementById("titleWrapper");
+const lyricsText = document.getElementById("lyricsText");
+const logoImg = document.getElementById("logo");
+
+fetch("songbundle/songlist.json").then(res => res.json()).then(data => { songData = data.songs; });
+
+function initAudioEngine() {
+    if (audioCtx) return;
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    dryGain = audioCtx.createGain();
+    echoOutGain = audioCtx.createGain();
+    delayNode = audioCtx.createDelay(1.0);
+    feedbackNode = audioCtx.createGain();
+    delayNode.delayTime.value = 0.3;
+    feedbackNode.gain.value = 0.5;
+    echoOutGain.gain.value = 0;
+    dryGain.connect(audioCtx.destination);
+    dryGain.connect(delayNode);
+    delayNode.connect(feedbackNode);
+    feedbackNode.connect(delayNode);
+    delayNode.connect(echoOutGain);
+    echoOutGain.connect(audioCtx.destination);
+    instSource = audioCtx.createMediaElementSource(instTrack);
+    vocalSource = audioCtx.createMediaElementSource(vocalTrack);
+    instSource.connect(dryGain);
+    vocalSource.connect(dryGain);
+}
+
+window.addEventListener("load", () => {
+    setTimeout(() => {
+        document.getElementById("loadingScreen").style.display = "none";
+        document.getElementById("mainContent").style.display = "block";
+        loadingFinished = true;
+        document.getElementById("bootSound").play().catch(()=>{});
+    }, 7000);
+});
+
+document.addEventListener("keydown", (e) => {
+    if (!loadingFinished) return;
+    const key = e.key.toLowerCase();
+    if (key === "enter") {
+        initAudioEngine();
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+        playSelectedSong();
+    } else if (key === "p") {
+        togglePause();
+    } else if (/^[0-9]$/.test(key)) {
+        new Audio(`assets/${key}_wz.mp3`).play().catch(()=>{});
+        currentNumbers = currentNumbers.length >= limit ? currentNumbers.substring(1) + key : currentNumbers + key;
+        display.textContent = currentNumbers;
+        resetToNormal();
+    }
+});
+
+function resetToNormal() {
+    stopAll();
+    isPlaying = false;
+    lyricsText.textContent = "";
+    titleWrapper.className = "blink"; 
+    logoImg.style.display = "block";
+    logoImg.style.opacity = "1";
+    if (songData[currentNumbers]) {
+        title.textContent = songData[currentNumbers][0].toUpperCase();
+        artist.textContent = songData[currentNumbers][1].toUpperCase();
+        codeDisplay.textContent = currentNumbers;
+        artist.style.display = "block";
+    } else {
+        title.textContent = "SELECT SONG"; artist.textContent = ""; codeDisplay.textContent = ""; artist.style.display = "none";
+    }
+}
+
+async function fetchLyrics(song, artistName) {
+    try {
+        // BetterLyrics API Logic (Example using a common lyrics API structure)
+        const response = await fetch(`https://api.lyrics.ovh/v1/${artistName}/${song}`);
+        const data = await response.json();
+        if (data.lyrics) {
+            // Clean lyrics and split into lines
+            lyricsArray = data.lyrics.split('\n').filter(line => line.trim() !== "");
+            console.log("Lyrics Loaded");
+        } else {
+            lyricsText.textContent = "LYRICS NOT FOUND";
+        }
+    } catch (e) {
+        console.log("Error fetching lyrics");
+    }
+}
+
+async function playSelectedSong() {
+    if (!songData[currentNumbers]) return;
+    const sT = songData[currentNumbers][0].trim();
+    const sA = songData[currentNumbers][1].trim();
+    const swkURL = `songbundle/${sA.toUpperCase()} - ${sT.toUpperCase()}.swk`;
+
+    titleWrapper.classList.remove('blink');
+    titleWrapper.classList.add('centerStage');
+    display.textContent = "";
+    logoImg.style.opacity = "0";
+
+    // Fetch lyrics while title is in center
+    fetchLyrics(sT, sA);
+
+    try {
+        const res = await fetch(swkURL);
+        const blob = await res.blob();
+        const zip = await JSZip.loadAsync(blob);
+        const zipFiles = Object.keys(zip.files);
+        const instKey = zipFiles.find(f => f.toLowerCase().includes("instruments.mp3"));
+        const vocalKey = zipFiles.find(f => f.toLowerCase().includes("vocals.mp3"));
+        instTrack.src = URL.createObjectURL(await zip.file(instKey).async("blob"));
+        vocalTrack.src = URL.createObjectURL(await zip.file(vocalKey).async("blob"));
+
+        setTimeout(() => {
+            if(titleWrapper.classList.contains('centerStage')) {
+                titleWrapper.classList.remove('centerStage');
+                titleWrapper.classList.add('cornerStage');
+                echoOutGain.gain.value = 0;
+                dryGain.gain.value = 1.0;
+                instTrack.play();
+                vocalTrack.play();
+                isPlaying = true;
+                startLyricsSync();
+            }
+        }, 4000);
+    } catch (err) { title.textContent = "FILE ERROR"; logoImg.style.opacity = "1"; }
+}
+
+function startLyricsSync() {
+    let lineIndex = 0;
+    // Basic sync: Change line every 4 seconds (Adjust as needed or use timestamped LRC if API provides it)
+    const lyricInterval = setInterval(() => {
+        if (!isPlaying || lineIndex >= lyricsArray.length) {
+            clearInterval(lyricInterval);
+            return;
+        }
+        lyricsText.textContent = lyricsArray[lineIndex].toUpperCase();
+        lineIndex++;
+    }, 4500); 
+}
+
+function togglePause() {
+    if (!instTrack.src || !audioCtx) return;
+    if (isPlaying) {
+        isPlaying = false;
+        titleWrapper.classList.add('pausedBlink');
+        echoOutGain.gain.setValueAtTime(1.0, audioCtx.currentTime);
+        dryGain.gain.setValueAtTime(0, audioCtx.currentTime);
+        setTimeout(() => { if (!isPlaying) { instTrack.pause(); vocalTrack.pause(); echoOutGain.gain.setTargetAtTime(0, audioCtx.currentTime, 0.5); } }, 2000);
+    } else {
+        isPlaying = true;
+        titleWrapper.classList.remove('pausedBlink');
+        echoOutGain.gain.setValueAtTime(0, audioCtx.currentTime);
+        dryGain.gain.setValueAtTime(1.0, audioCtx.currentTime);
+        instTrack.play();
+        vocalTrack.play();
+    }
+}
+
+function stopAll() {
+    instTrack.pause(); vocalTrack.pause();
+    if(echoOutGain) echoOutGain.gain.value = 0;
+    titleWrapper.classList.remove('pausedBlink');
+    if (instTrack.src.startsWith('blob:')) URL.revokeObjectURL(instTrack.src);
+    if (vocalTrack.src.startsWith('blob:')) URL.revokeObjectURL(vocalTrack.src);
+}
+</script>
+</body>
+</html>
