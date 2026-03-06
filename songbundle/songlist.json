@@ -1,0 +1,12 @@
+{
+  "serverfetch": "https://singwuaze.github.io/server-1/",
+
+  "songs": {
+    "00001": ["KUNDIMAN", "SILENT SANCTUARY"],
+    "34667": ["LUPANG HINIRANG", "NATIONAL ANTHEM"],
+    "20839": ["ALIPIN", "MICHAEL PANGILINAN"],
+    "00002": ["HARANA", "PAROKYA NI EDGAR"],
+    "00004": ["PANGARAP LANG KITA", "PAROKYA NI EDGAR"],
+    "09145": ["HULING SANDALI", "DECEMBER AVENUE"]
+  }
+}
